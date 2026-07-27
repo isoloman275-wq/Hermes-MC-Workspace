@@ -1,0 +1,4 @@
+{
+  "COMFYUI_BASE_URL": "http://<host-m2>:8188",
+  "note": "ComfyUI endpoint for Mission Control's GEN panel. Edit and restart MC (or let the supervisor restart it) to apply. env var COMFYUI_BASE_URL / COMFY_CLOUD_API_KEY override this file."
+}

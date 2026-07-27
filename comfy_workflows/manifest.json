@@ -1,0 +1,4 @@
+{
+  "note": "No workflows are bundled. Drop your own ComfyUI API-format workflow JSONs in this folder, then add a matching entry to the 'workflows' list below (id -> file + params with node/input pins). The MC GEN panel picks them up automatically via /api/comfy/workflows. See comfy_workflows/README.md.",
+  "workflows": []
+}

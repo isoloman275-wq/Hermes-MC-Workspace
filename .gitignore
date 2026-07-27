@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+mc.log
+.env
+server.py.bak*
+C:\\tmp/
+*.bak

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mission Control</title>
+<link rel="stylesheet" href="/css/style.css?v=20260727e" />
+<script type="importmap">
+{ "imports": {
+  "three": "/js/lib/three.module.js",
+  "three/addons/": "/js/lib/jsm/"
+}}
+</script>
+</head>
+<body>
+<div id="ui-root">
+<!-- 3D scene: popups/labels/controls are baked in-world. The terminal/chat UI is a
+     high-opacity HTML overlay on the left (operator decision 2026-07-21). -->
+<div id="hermes-ui">
+  <section id="hud-kanban" class="collapsed">
+    <header class="hud-head"><span>KANBAN</span><button id="kanban-new" title="new task">+ task</button></header>
+    <div id="kanban-list"></div>
+  </section>
+  <section id="hud-warlog" class="collapsed">
+    <header class="hud-head"><span>WAR LOG</span></header>
+    <div id="warlog-list"></div>
+  </section>
+  <section id="hud-approvals" class="collapsed">
+    <header class="hud-head"><span>GREENLIGHT</span></header>
+    <div id="hud-approvals-body"></div>
+  </section>
+  <section id="hud-metrics" class="collapsed">
+    <header class="hud-head"><span>FLEET METRICS</span></header>
+    <div id="hud-metrics-body"></div>
+  </section>
+  <section id="hud-cron" class="collapsed">
+    <header class="hud-head"><span>CRON MANAGER</span></header>
+    <div id="hud-cron-body"></div>
+  </section>
+  <section id="hud-gen" class="collapsed">
+    <header class="hud-head"><span>GEN · COMFYUI</span></header>
+    <div class="gen-body">
+      <div id="m2-vram" class="gen-status">M2 VRAM: …</div>
+      <div class="gen-row">
+        <button id="free-m2">Free M2 VRAM</button>
+      </div>
+      <select id="gen-workflow"></select>
+      <div id="gen-params"></div>
+      <label class="gen-field">Reference image (img2img)
+        <input id="gen-image" type="file" accept="image/*" />
+      </label>
+      <div class="gen-row">
+        <button id="gen-go">Generate</button>
+        <span id="gen-status" class="gen-status"></span>
+      </div>
+    </div>
+  </section>
+  <section id="hud-preview" class="collapsed">
+    <header class="hud-head"><span>PREVIEW</span></header>
+    <div class="preview-tabs">
+      <button class="pv-tab active" data-tab="gallery">Gallery</button>
+      <button class="pv-tab" data-tab="web">Web</button>
+      <button class="pv-tab" data-tab="device">Device</button>
+    </div>
+    <div class="preview-bar" id="pv-web-bar" hidden>
+      <input id="pv-url" type="text" placeholder="paste a URL — https://…" autocomplete="off" />
+      <button id="pv-go" class="wc-btn">Load</button>
+    </div>
+    <div class="preview-bar" id="pv-dev-bar" hidden>
+      <select id="pv-device">
+        <option value="iphone">📱 iPhone</option>
+        <option value="android">🤖 Android</option>
+        <option value="tablet">▭ Tablet</option>
+        <option value="laptop">💻 Laptop</option>
+      </select>
+      <input id="pv-dev-url" type="text" placeholder="URL to load inside device" autocomplete="off" />
+      <button id="pv-dev-go" class="wc-btn">Load</button>
+    </div>
+    <div id="preview-body" class="preview-body"><div class="gen-status">no renders yet</div></div>
+    <div id="preview-web" class="preview-web" hidden></div>
+    <div id="preview-device" class="preview-device" hidden></div>
+  </section>
+  <section id="hud-chat">
+    <header class="hud-head"><span>HERMES · CHAT</span></header>
+    <div id="chat-log"></div>
+    <div id="chat-route" class="chat-route">
+      <span class="cr-label">route:</span>
+      <button class="cr-btn active" data-provider="openrouter" data-model="<brain-model>">☁ Cloud</button>
+      <button class="cr-btn" data-provider="ollama-m1" data-model="<your-model>" disabled title="M1 Ollama offline — becomes fallback when M1 is up">M1</button>
+      <button class="cr-btn" data-provider="ollama-m3" data-model="<your-small-model-a>" title="M3 · <your-small-model-a> (kanban) — local fallback">M3</button>
+    </div>
+    <div id="chat-input-row">
+      <button id="chat-ptt" class="chat-btn" title="Push to talk (hold, then speak)">🎙</button>
+      <input id="chat-input" type="text" autocomplete="off" placeholder="message the operator…  (!task <title> @assignee)" />
+      <button id="chat-speak" class="chat-btn" title="Toggle Hermes voice output">🔊</button>
+      <button id="chat-send">Send</button>
+    </div>
+  </section>
+</div>
+
+<div id="task-terminals"></div>
+
+<!-- Bottom-right 3D world control cluster -->
+<div id="world-control">
+  <button class="wc-btn" data-act="reset"   title="Reset camera view">⤢ Reset</button>
+  <button class="wc-btn" data-act="resetlayout" title="Reset panel layout to default">▤ Layout</button>
+  <button class="wc-btn" data-act="worker"  title="Open worker-dispatch terminal">⚒ Worker</button>
+  <button class="wc-btn" data-act="ptt"     title="Push to talk (hold, then speak)">🎙 Talk</button>
+  <button class="wc-btn" data-act="createprofile" title="Create a new Hermes profile">＋ Profile</button>
+</div>
+
+<!-- Create-profile modal (also opened by double-clicking a Titan) -->
+<div id="profile-modal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">＋ CREATE PROFILE</div>
+    <label class="modal-row">Name (lowercase)
+      <input id="pp-name" type="text" placeholder="e.g. qa-lead" autocomplete="off" />
+    </label>
+    <label class="modal-row">Lives on machine
+      <select id="pp-machine">
+        <option value="m1">Primary Node (WSL)</option>
+        <option value="m2" selected>LLM Server (inference)</option>
+        <option value="m3">Worker Node (background)</option>
+      </select>
+    </label>
+    <label class="modal-row">Description (role)
+      <input id="pp-desc" type="text" placeholder="what this profile is good at" autocomplete="off" />
+    </label>
+    <div id="pp-status" class="modal-status"></div>
+    <div class="modal-actions">
+      <button id="pp-cancel" class="wc-btn">Cancel</button>
+      <button id="pp-create" class="wc-btn modal-go">Create</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<script type="module" src="/js/characters.js?v=20260727e"></script>
+<script type="module" src="/js/app.js?v=20260727e"></script>
+</body>
+</html>
