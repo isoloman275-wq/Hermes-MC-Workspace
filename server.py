@@ -9,7 +9,7 @@ Mission Control + Kanban — merged 3D war-room backend.
 
 Stdlib only. SSE live feed. Windows-proxy LAN probing for M2/M3.
 """
-import json, os, sqlite3, subprocess, threading, socket, datetime, time, re, uuid
+import json, os, sqlite3, subprocess, threading, socket, datetime, time, re, uuid, sys
 try:
     import yaml
 except Exception:
@@ -79,6 +79,42 @@ socket.setdefaulttimeout(6)
 PORT = int(os.environ.get("PORT", "8777"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 KANBAN_DB = os.path.expanduser("~/.hermes/kanban.db")
+
+# ---- Security hardening (public deploy) ----
+# Bind loopback by default so a fresh clone is NOT exposed to the LAN/internet.
+# To reach Mission Control from other devices, set BIND_HOST=0.0.0.0 AND set
+# MC_API_TOKEN (any non-empty string). When MC_API_TOKEN is set, EVERY /api/*
+# route requires `Authorization: Bearer <MC_API_TOKEN>`. When binding to a
+# non-loopback address without a token, startup is refused — no silent exposure.
+BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
+MC_API_TOKEN = os.environ.get("MC_API_TOKEN", "").strip()
+MC_ALLOWED_ORIGIN = os.environ.get("MC_ALLOWED_ORIGIN", "").strip()
+
+def _cors_headers():
+    """Return a CORS header dict. Wildcard CORS is disabled by default: if
+    MC_ALLOWED_ORIGIN is set we echo exactly that origin; otherwise no ACAO is
+    sent (same-origin only), which blocks cross-site data theft / CSRF."""
+    h = {}
+    if MC_ALLOWED_ORIGIN:
+        h["Access-Control-Allow-Origin"] = MC_ALLOWED_ORIGIN
+        h["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        h["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        h["Vary"] = "Origin"
+    return h
+
+def _auth_valid(auth_header):
+    """Constant-time-ish bearer token check (only enforced when a token is set)."""
+    if not MC_API_TOKEN:
+        return True
+    h = auth_header or ""
+    want = "Bearer " + MC_API_TOKEN
+    if len(h) != len(want):
+        return False
+    diff = 0
+    for a, b in zip(h, want):
+        diff |= ord(a) ^ ord(b)
+    return diff == 0
+
 
 # ---- Machines (edit freely) ----
 # Add or remove "Node" entries as needed — one node or twenty.
@@ -905,7 +941,8 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="application/json"):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in _cors_headers().items():
+            self.send_header(k, v)
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.end_headers()
         if isinstance(body, str):
@@ -918,7 +955,8 @@ class Handler(BaseHTTPRequestHandler):
         rng = self.headers.get("Range")
         self.send_response(206 if rng else 200)
         self.send_header("Content-Type", ctype)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in _cors_headers().items():
+            self.send_header(k, v)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         if rng:
@@ -946,6 +984,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = urlparse(self.path).path
+        # Gate only /api/* routes (dashboard static assets load freely; all data
+        # + state-changing endpoints require the bearer token when one is set).
+        if p.startswith("/api/") and not _auth_valid(self.headers.get("Authorization")):
+            self._send(401, json.dumps({"error": "unauthorized"}))
+            return
         if p == "/" or p == "/index.html":
             self._serve_file("index.html", "text/html")
         elif p == "/api/state":
@@ -1035,6 +1078,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p = urlparse(self.path).path
+        if not _auth_valid(self.headers.get("Authorization")):
+            self._send(401, json.dumps({"error": "unauthorized"}))
+            return
         try:
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) if length else b"{}"
@@ -1248,7 +1294,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "not found")
 
     def _serve_file(self, rel, ctype):
-        fp = os.path.join(HERE, "static", rel)
+        # Path-traversal guard: normalize and ensure the resolved path stays
+        # inside the static/ directory. Reject '..', absolute paths, and escapes.
+        base = os.path.realpath(os.path.join(HERE, "static"))
+        fp = os.path.realpath(os.path.join(HERE, "static", rel))
+        if not (fp == base or fp.startswith(base + os.sep)):
+            self._send(403, json.dumps({"error": "forbidden"}))
+            return
         if not os.path.isfile(fp):
             self._send(404, "missing")
             return
@@ -1259,7 +1311,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        for k, v in _cors_headers().items():
+            self.send_header(k, v)
         self.end_headers()
         import queue
         q = queue.Queue()
@@ -1345,7 +1398,17 @@ def resolve_approval(aid, decision, by):
 
 if __name__ == "__main__":
     _init_approvals_db()
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    loopback = BIND_HOST in ("127.0.0.1", "localhost", "::1")
+    if not loopback and not MC_API_TOKEN:
+        sys.stderr.write(
+            "REFUSED: refusing to bind %s (non-loopback) without MC_API_TOKEN.\n"
+            "Set MC_API_TOKEN to any non-empty string to expose Mission Control "
+            "to other devices, then restart.\n" % BIND_HOST)
+        sys.exit(1)
+    srv = ThreadingHTTPServer((BIND_HOST, PORT), Handler)
     threading.Thread(target=collector_loop, daemon=True).start()
-    print(f"Mission Control + Kanban on http://0.0.0.0:{PORT}")
+    if loopback:
+        print(f"Mission Control + Kanban on http://127.0.0.1:{PORT} (loopback only)")
+    elif MC_API_TOKEN:
+        print(f"Mission Control + Kanban on http://{BIND_HOST}:{PORT} (bearer-token protected)")
     srv.serve_forever()

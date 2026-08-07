@@ -5,3 +5,7 @@ mc.log
 server.py.bak*
 C:\\tmp/
 *.bak
+
+# never commit real ComfyUI keys/endpoints
+comfy_env.json
+comfy_gallery.json
