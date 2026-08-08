@@ -50,3 +50,5 @@ All rights reserved to the author; free to use, modify, and redistribute under t
 
 *Note: internal planning docs, screenshots, and the author's personal gallery renders
 were intentionally excluded from this public release.*
+
+> **Status:** maintained · part of the NZ1Labs open-source homelab tooling. Contributions welcome.
